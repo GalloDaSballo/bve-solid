@@ -3,7 +3,6 @@
 pragma solidity ^0.6.0;
 pragma experimental ABIEncoderV2;
 
-
 interface IBaseV1Router01 {
     struct route {
         address from;
@@ -12,33 +11,39 @@ interface IBaseV1Router01 {
     }
 
     function addLiquidity(
-      address tokenA,
-      address tokenB,
-      bool stable,
-      uint amountADesired,
-      uint amountBDesired,
-      uint amountAMin,
-      uint amountBMin,
-      address to,
-      uint deadline
-  ) external returns (uint amountA, uint amountB, uint liquidity);
+        address tokenA,
+        address tokenB,
+        bool stable,
+        uint256 amountADesired,
+        uint256 amountBDesired,
+        uint256 amountAMin,
+        uint256 amountBMin,
+        address to,
+        uint256 deadline
+    )
+        external
+        returns (
+            uint256 amountA,
+            uint256 amountB,
+            uint256 liquidity
+        );
 
-  function removeLiquidity(
-      address tokenA,
-      address tokenB,
-      bool stable,
-      uint liquidity,
-      uint amountAMin,
-      uint amountBMin,
-      address to,
-      uint deadline
-  ) external returns (uint amountA, uint amountB);
+    function removeLiquidity(
+        address tokenA,
+        address tokenB,
+        bool stable,
+        uint256 liquidity,
+        uint256 amountAMin,
+        uint256 amountBMin,
+        address to,
+        uint256 deadline
+    ) external returns (uint256 amountA, uint256 amountB);
 
-  function swapExactTokensForTokens(
-      uint amountIn,
-      uint amountOutMin,
-      route[] calldata routes,
-      address to,
-      uint deadline
-  ) external returns (uint[] memory amounts);
+    function swapExactTokensForTokens(
+        uint256 amountIn,
+        uint256 amountOutMin,
+        route[] calldata routes,
+        address to,
+        uint256 deadline
+    ) external returns (uint256[] memory amounts);
 }

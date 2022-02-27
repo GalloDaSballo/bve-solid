@@ -10,6 +10,7 @@ import "../deps/@openzeppelin/contracts-upgradeable/utils/AddressUpgradeable.sol
 import "../deps/@openzeppelin/contracts-upgradeable/token/ERC20/SafeERC20Upgradeable.sol";
 
 import "../interfaces/badger/IController.sol";
+import "../interfaces/solidly/IBaseV1Gauge.sol";
 
 import {BaseStrategy} from "../deps/BaseStrategy.sol";
 
@@ -19,8 +20,11 @@ contract MyStrategy is BaseStrategy {
     using SafeMathUpgradeable for uint256;
 
     // address public want // Inherited from BaseStrategy, the token the strategy wants, swaps into and tries to grow
-    address public lpComponent; // Token we provide liquidity with
+    address public lpComponent; // Gauge
     address public reward; // Token we farm and swap to want / lpComponent
+
+    address public constant BADGER_TREE =
+        0x89122c767A5F543e663DB536b603123225bc3823;
 
     // Used to signal to the Badger Tree that rewards where sent to it
     event TreeDistribution(
@@ -56,14 +60,14 @@ contract MyStrategy is BaseStrategy {
         withdrawalFee = _feeConfig[2];
 
         /// @dev do one off approvals here
-        // IERC20Upgradeable(want).safeApprove(gauge, type(uint256).max);
+        IERC20Upgradeable(want).safeApprove(lpComponent, type(uint256).max);
     }
 
     /// ===== View Functions =====
 
     // @dev Specify the name of the strategy
     function getName() external pure override returns (string memory) {
-        return "StrategyName";
+        return "SolidlyStaker";
     }
 
     // @dev Specify the version of the Strategy, for upgrades
@@ -73,12 +77,12 @@ contract MyStrategy is BaseStrategy {
 
     /// @dev Balance of want currently held in strategy positions
     function balanceOfPool() public view override returns (uint256) {
-        return 0;
+        return IBaseV1Gauge(lpComponent).balanceOf(address(this));
     }
 
     /// @dev Returns true if this strategy requires tending
     function isTendable() public view override returns (bool) {
-        return true;
+        return false;
     }
 
     // @dev These are the tokens that cannot be moved except by the vault
@@ -112,10 +116,14 @@ contract MyStrategy is BaseStrategy {
     /// @dev invest the amount of want
     /// @notice When this function is called, the controller has already sent want to this
     /// @notice Just get the current balance and then invest accordingly
-    function _deposit(uint256 _amount) internal override {}
+    function _deposit(uint256 _amount) internal override {
+        IBaseV1Gauge(lpComponent).deposit(_amount, 0);
+    }
 
     /// @dev utility function to withdraw everything for migration
-    function _withdrawAll() internal override {}
+    function _withdrawAll() internal override {
+        IBaseV1Gauge(lpComponent).withdrawAll();
+    }
 
     /// @dev withdraw the specified amount of want, liquidate from lpComponent to want, paying off any necessary debt for the conversion
     function _withdrawSome(uint256 _amount)
@@ -123,58 +131,55 @@ contract MyStrategy is BaseStrategy {
         override
         returns (uint256)
     {
-        return _amount;
+        uint256 balanceBefore = balanceOfWant();
+        IBaseV1Gauge(lpComponent).withdraw(_amount);
+        return balanceOfWant().sub(balanceBefore);
     }
 
     /// @dev Harvest from strategy mechanics, realizing increase in underlying position
     function harvest() external whenNotPaused returns (uint256 harvested) {
         _onlyAuthorizedActors();
 
-        uint256 _before = IERC20Upgradeable(want).balanceOf(address(this));
+        address[] memory rewards = new address[](1);
+        rewards[0] = reward;
 
-        // Write your code here
+        IBaseV1Gauge(lpComponent).getReward(address(this), rewards);
+        uint256 rewardBalance = IERC20Upgradeable(reward).balanceOf(
+            address(this)
+        );
 
-        uint256 earned =
-            IERC20Upgradeable(want).balanceOf(address(this)).sub(_before);
+        if (rewardBalance > 0) {
+            (
+                uint256 governanceRewardsFee,
+                uint256 strategistRewardsFee
+            ) = _processRewardsFees(rewardBalance, reward);
 
-        /// @notice Keep this in so you get paid!
-        (uint256 governancePerformanceFee, uint256 strategistPerformanceFee) =
-            _processRewardsFees(earned, want);
+            // Transfer balance of Sushi to the Badger Tree
+            uint256 rewardToTree = rewardBalance.sub(governanceRewardsFee).sub(
+                strategistRewardsFee
+            );
+            IERC20Upgradeable(reward).safeTransfer(BADGER_TREE, rewardToTree);
 
-        // TODO: If you are harvesting a reward token you're not compounding
-        // You probably still want to capture fees for it
-        // // Process Sushi rewards if existing
-        // if (sushiAmount > 0) {
-        //     // Process fees on Sushi Rewards
-        //     // NOTE: Use this to receive fees on the reward token
-        //     _processRewardsFees(sushiAmount, SUSHI_TOKEN);
-
-        //     // Transfer balance of Sushi to the Badger Tree
-        //     // NOTE: Send reward to badgerTree
-        //     uint256 sushiBalance = IERC20Upgradeable(SUSHI_TOKEN).balanceOf(address(this));
-        //     IERC20Upgradeable(SUSHI_TOKEN).safeTransfer(badgerTree, sushiBalance);
-        //
-        //     // NOTE: Signal the amount of reward sent to the badger tree
-        //     emit TreeDistribution(SUSHI_TOKEN, sushiBalance, block.number, block.timestamp);
-        // }
+            // NOTE: Signal the amount of reward sent to the badger tree
+            emit TreeDistribution(
+                reward,
+                rewardToTree,
+                block.number,
+                block.timestamp
+            );
+        }
 
         /// @dev Harvest event that every strategy MUST have, see BaseStrategy
-        emit Harvest(earned, block.number);
+        emit Harvest(0, block.number);
 
-        /// @dev Harvest must return the amount of want increased
-        return earned;
+        // No autocompounding
+        harvested = 0;
     }
-
-    // Alternative Harvest with Price received from harvester, used to avoid exessive front-running
-    function harvest(uint256 price)
-        external
-        whenNotPaused
-        returns (uint256 harvested)
-    {}
 
     /// @dev Rebalance, Compound or Pay off debt here
     function tend() external whenNotPaused {
         _onlyAuthorizedActors();
+        revert();
     }
 
     /// ===== Internal Helper Functions =====

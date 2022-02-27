@@ -4,9 +4,9 @@
 BADGER_DEV_MULTISIG = "0xb65cef03b9b89f99517643226d76e286ee999e77"
 
 ## NOTE: Because this is a bodged testnet mix, conftest.py is the "real" code and these are just values to feed to the strat
-WANT = "0xa3502f18766b17a07B487C6F395A23d3ef67D4DE"  ## pair from conftest.py
-LP_COMPONENT = "0xdeb44B8d020952942734b370768F44b4F3226afd"  ## gauge from conftest.py
-REWARD_TOKEN = "0x0673e1CF8EE91095232CFC98Ee1EbCeF42A1977E"  ## baseToken from conftest.py
+WANT = "0xC0240Ee4405f11EFb87A00B432A8be7b7Afc97CC"  ## usdc/dai
+LP_COMPONENT = "0x9C7EaC4b4a8d37fA9dE7e4cb81F0a99256C672d1"  ## gauge
+REWARD_TOKEN = "0x888EF71766ca594DED1F0FA3AE64eD2941740A20"  ## solid
 
 PROTECTED_TOKENS = [WANT, LP_COMPONENT, REWARD_TOKEN]
 ## Fees in Basis Points

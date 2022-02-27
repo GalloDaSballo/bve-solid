@@ -43,7 +43,7 @@ def test_deposit_withdraw_single_user_flow(
 
 
 def test_single_user_harvest_flow(
-    deployer, vault, sett, controller, strategy, want, settKeeper, strategyKeeper
+    deployer, vault, sett, controller, strategy, want, settKeeper, strategyKeeper, voter
 ):
     # Setup
     snap = SnapshotManager(vault, strategy, controller, "StrategySnapshot")
@@ -78,8 +78,8 @@ def test_single_user_harvest_flow(
     if tendable:
         snap.settTend({"from": strategyKeeper})
 
-    chain.sleep(days(1))
-    chain.mine()
+    chain.sleep(days(14))
+    voter.distribute({"from": deployer})
 
     with brownie.reverts("onlyAuthorizedActors"):
         strategy.harvest({"from": randomUser})
@@ -250,7 +250,7 @@ def test_withdraw_other(deployer, sett, controller, strategy, want):
 
 
 def test_single_user_harvest_flow_remove_fees(
-    deployer, vault, sett, controller, strategy, want
+    deployer, vault, sett, controller, strategy, want, voter
 ):
     # Setup
     randomUser = accounts[6]
@@ -275,8 +275,8 @@ def test_single_user_harvest_flow_remove_fees(
     if tendable:
         snap.settTend({"from": deployer})
 
-    chain.sleep(days(1))
-    chain.mine()
+    chain.sleep(days(14))
+    voter.distribute({"from": deployer})
 
     with brownie.reverts("onlyAuthorizedActors"):
         strategy.harvest({"from": randomUser})
@@ -284,7 +284,7 @@ def test_single_user_harvest_flow_remove_fees(
     snap.settHarvest({"from": deployer})
 
     ## NOTE: Some strats do not do this, change accordingly
-    assert want.balanceOf(controller.rewards()) > 0
+    # assert want.balanceOf(controller.rewards()) > 0
 
     chain.sleep(days(1))
     chain.mine()

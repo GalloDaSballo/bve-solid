@@ -16,46 +16,67 @@ from config import (
 from dotmap import DotMap
 import pytest
 
+
 @pytest.fixture
-def pair():
-    return interface.underlying("0xa3502f18766b17a07B487C6F395A23d3ef67D4DE")
+def solid():
+    return interface.IBaseV1Token("0x888EF71766ca594DED1F0FA3AE64eD2941740A20")
+
 
 @pytest.fixture
 def router():
-    return interface.IBaseV1Router01("0x22460Cd07159EC690166860f15966C1446ED762B")
+    return interface.IBaseV1Router01("0xa38cd27185a464914D3046f0AB9d43356B34829D")
+
 
 @pytest.fixture
-def minter():
-    return interface.IBaseV1Minter("0x3230F944a26288f49F5010b11BA96b0b9dC84e79")
+def ve():
+    return interface.IVe("0xcBd8fEa77c2452255f59743f55A3Ea9d83b3c72b")
+
 
 @pytest.fixture
-def ve(): 
-    return interface.ve("0xBE6bb6d9F4B1Bc2Ea1C0d69a17471b98bd164ab6")
+def voter():
+    return interface.IBaseV1Voter("0xdC819F5d05a6859D2faCbB4A44E5aB105762dbaE")
+
 
 @pytest.fixture
-def voter():  
-    return interface.IBaseV1Voter("0xd2F7fF8e5b362bafE2b57a82c5865B4355F884Ae")
-
-@pytest.fixture
-def gauge():  
-    return interface.IBaseV1Gauge("0xdeb44B8d020952942734b370768F44b4F3226afd")
-
-@pytest.fixture
-def baseToken():  
-    return interface.underlying("0x0673e1CF8EE91095232CFC98Ee1EbCeF42A1977E")
-    
-@pytest.fixture
-def custom_setup(pair, router, minter, ve, voter, gauge, baseToken):
-    wftm = interface.underlying("0x27Ce41c3cb9AdB5Edb2d8bE253A1c6A64Db8c96d")
-    ftm = interface.WETH("0x27Ce41c3cb9AdB5Edb2d8bE253A1c6A64Db8c96d")
-    usdt = interface.underlying("0x8ad96050318043166114884b59E2fc82210273b3")
-
+def custom_setup(web3, router, solid, ve, voter):
     dev = accounts[0]
+    STABLE = True
     AMT = 1000e18
+
+    pair = interface.IBaseV1Pair(WANT)
+
+    token0 = interface.IBridgedToken(pair.token0())
+    token1 = interface.IBridgedToken(pair.token1())
+
+    for token in [token0, token1]:
+        token.Swapin(web3.keccak(0), dev, AMT, {"from": token.owner()})
+
+        token.approve(router, AMT, {"from": dev})
+
+    ## Add liquidity
+    router.addLiquidity(
+        token0,
+        token1,
+        STABLE,
+        token0.balanceOf(dev),
+        token1.balanceOf(dev),
+        0,
+        0,
+        dev,
+        999999999999999999999,
+        {"from": dev},
+    )
+
+    ## Confirm liqudiity is in
+    print(f"Balance: {pair.balanceOf(dev)}")
+
+    ## Approve the gauge
+    pair.approve(LP_COMPONENT, pair.balanceOf(dev), {"from": dev})
+
     ## Mint token
-    baseToken.mint(dev, AMT, {"from": dev})
+    solid.mint(dev, AMT, {"from": solid.minter()})
     ## Approve for locking
-    baseToken.approve(ve, AMT, {"from": dev})
+    solid.approve(ve, AMT, {"from": dev})
     ## Lock for 4 years
     lock_tx = ve.create_lock(AMT, 4 * 365 * 86400, {"from": dev})
 
@@ -63,25 +84,6 @@ def custom_setup(pair, router, minter, ve, voter, gauge, baseToken):
     LOCK_ID = lock_tx.return_value
     voter.vote(LOCK_ID, [pair], [100], {"from": dev})
 
-
-    ## Mint wFTM
-    ftm.deposit({"from": dev, "value": 1e18})
-    wftm.balanceOf(dev)
-    # Mint USDT
-    usdt.mint(dev, 3000e18, {"from": dev})
-
-    ## Approve router
-    wftm.approve(router, wftm.balanceOf(dev), {"from": dev})
-    usdt.approve(router, usdt.balanceOf(dev), {"from": dev})
-
-    ## Add liquidity
-    router.addLiquidity(wftm, usdt, False, wftm.balanceOf(dev), usdt.balanceOf(dev), 0, 0, dev, 999999999999999999999, {"from": dev})
-
-    ## Confirm liqudiity is in
-    pair.balanceOf(dev)
-
-    ## Approve the gauge
-    pair.approve(gauge, pair.balanceOf(dev), {"from": dev})
 
 @pytest.fixture
 def deployed(custom_setup):
@@ -155,10 +157,7 @@ def deployed(custom_setup):
         want=want,
         lpComponent=lpComponent,
         rewardToken=rewardToken,
-        
     )
-
-
 
 
 ## Contracts ##
@@ -218,6 +217,7 @@ def settKeeper(vault):
 @pytest.fixture
 def strategyKeeper(strategy):
     return accounts.at(strategy.keeper(), force=True)
+
 
 ## Forces reset before each test
 @pytest.fixture(autouse=True)

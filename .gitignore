@@ -1,13 +1,18 @@
-# Brownie
+# brownie
 __pycache__
 .history
 .hypothesis/
 build/
 reports/
-.env
 venv/
 cache/
 artifacts/
 
-# Node/npm
+# node
 node_modules/
+
+# foundry
+out/
+
+# secrets
+.env
