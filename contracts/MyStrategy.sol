@@ -8,13 +8,16 @@ import "../deps/@openzeppelin/contracts-upgradeable/math/SafeMathUpgradeable.sol
 import "../deps/@openzeppelin/contracts-upgradeable/math/MathUpgradeable.sol";
 import "../deps/@openzeppelin/contracts-upgradeable/utils/AddressUpgradeable.sol";
 import "../deps/@openzeppelin/contracts-upgradeable/token/ERC20/SafeERC20Upgradeable.sol";
+import "../deps/@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 
 import "../interfaces/badger/IController.sol";
 import "../interfaces/solidly/IBaseV1Gauge.sol";
+import "../interfaces/solidly/IBaseV1Voter.sol";
+import "../interfaces/solidly/IVe.sol";
 
 import {BaseStrategy} from "../deps/BaseStrategy.sol";
 
-contract MyStrategy is BaseStrategy {
+contract MyStrategy is BaseStrategy, ReentrancyGuardUpgradeable {
     using SafeERC20Upgradeable for IERC20Upgradeable;
     using AddressUpgradeable for address;
     using SafeMathUpgradeable for uint256;
@@ -26,6 +29,21 @@ contract MyStrategy is BaseStrategy {
     address public constant BADGER_TREE =
         0x89122c767A5F543e663DB536b603123225bc3823;
 
+    
+    IVe public constant VE = IVe(0xcBd8fEa77c2452255f59743f55A3Ea9d83b3c72b);
+
+    IBaseV1Voter public constant VOTER = IBaseV1Voter(0xdC819F5d05a6859D2faCbB4A44E5aB105762dbaE);
+    
+    uint256 public lockId; // Will be set on first lock and always used
+
+    bool public relockOnEarn; // Should we relock?
+    bool public relockOnTend;
+
+    uint public constant MAXTIME = 4 * 365 * 86400;
+
+    event SetRelockOnEarn(bool value);
+    event SetRelockOnTend(bool value);
+
     // Used to signal to the Badger Tree that rewards where sent to it
     event TreeDistribution(
         address indexed token,
@@ -33,6 +51,13 @@ contract MyStrategy is BaseStrategy {
         uint256 indexed blockNumber,
         uint256 timestamp
     );
+
+    function _onlyTrusted() internal view {
+        require(
+            msg.sender == keeper || msg.sender == governance || msg.sender == strategist,
+            "_onlyTrusted"
+        );
+    }
 
     function initialize(
         address _governance,
@@ -60,14 +85,15 @@ contract MyStrategy is BaseStrategy {
         withdrawalFee = _feeConfig[2];
 
         /// @dev do one off approvals here
-        IERC20Upgradeable(want).safeApprove(lpComponent, type(uint256).max);
+        // Approve the Locker for SOLID
+        IERC20Upgradeable(want).safeApprove(address(VE), type(uint256).max);
     }
 
     /// ===== View Functions =====
 
     // @dev Specify the name of the strategy
     function getName() external pure override returns (string memory) {
-        return "SolidlyStaker";
+        return "Strategy Vested Escrow Solid";
     }
 
     // @dev Specify the version of the Strategy, for upgrades
@@ -75,9 +101,19 @@ contract MyStrategy is BaseStrategy {
         return "1.0";
     }
 
+    /// @dev When does the lock expire?
+    function unlocksAt() public view returns (uint256) {
+        return VE.locked(lockId).end; 
+    }
+
     /// @dev Balance of want currently held in strategy positions
     function balanceOfPool() public view override returns (uint256) {
-        return IBaseV1Gauge(lpComponent).balanceOf(address(this));
+        if(lockId != 0){
+            return uint256(VE.locked(lockId).amount);
+        }
+
+        // No lock yet
+        return 0;
     }
 
     /// @dev Returns true if this strategy requires tending
@@ -93,9 +129,8 @@ contract MyStrategy is BaseStrategy {
         returns (address[] memory)
     {
         address[] memory protectedTokens = new address[](3);
-        protectedTokens[0] = want;
-        protectedTokens[1] = lpComponent;
-        protectedTokens[2] = reward;
+        protectedTokens[0] = want; // SOLID
+        protectedTokens[1] = lpComponent; // VE
         return protectedTokens;
     }
 
@@ -113,16 +148,189 @@ contract MyStrategy is BaseStrategy {
         }
     }
 
+    //// === VE CUSTOM == //
+
+    /// @notice Because locks last 4 years, we let strategist change the setting, impact is minimal
+    function setRelockOnEarn(bool _relock) external {
+        _onlyTrusted();
+        relockOnEarn = _relock;
+        emit SetRelockOnEarn(_relock);
+    }
+
+    function setRelockOnTend(bool _relock) external {
+        _onlyTrusted();
+        relockOnTend = _relock;
+        emit SetRelockOnTend(_relock);
+    }
+
+
+    /// Claim Tokens
+    function claimRewards(address[] memory _gauges, address[][] memory _tokens) external nonReentrant {
+        _onlyTrusted();
+        VOTER.claimRewards(_gauges, _tokens);
+
+        revert("TODO"); // TODO: Figure out what to do here, prob gotta harvest what we got
+    }
+
+    function claimBribes(address[] memory _bribes, address[][] memory _tokens, uint _tokenId) external nonReentrant {
+        _onlyTrusted();
+        VOTER.claimBribes(_bribes, _tokens, _tokenId);
+
+        revert("TODO"); // TODO: Figure out what to do here, prob gotta harvest what we got
+    }
+
+    function claimFees(address[] memory _fees, address[][] memory _tokens, uint _tokenId) external nonReentrant {
+        _onlyTrusted();
+
+        address[] memory tokensAlreadyProcessed = new address[](50); // Our flattened list
+        uint256[] memory amounts = new uint256[](50); // Our amounts
+
+        // We flatten by simply doubly iterating on `_tokens` and if we already processed we don't add
+        // When iterating again we will check for address(0) and if found we will stop looping
+
+
+
+        VOTER.claimFees(_fees, _tokens, _tokenId);
+
+        revert("TODO"); // TODO: Figure out what to do here, prob gotta harvest what we got
+    }
+
+    
+    /// VOTE
+    function vote(address[] memory _poolVote, int256[] memory _weights) external nonReentrant {
+        _onlyGovernance();
+        VOTER.vote(lockId, _poolVote, _weights);
+
+        /// To Consider, after voting we could set a lit of pools which would allow to derive the gauges to claim from
+    }
+
+    function _handleToken(address token, uint256 _amount) internal {
+        if(_amount == 0) { return; }
+
+        if(token == want) {
+            // It's SOLID, lock more, emit harvest event
+            VE.increase_amount(lockId, _amount);
+
+            emit Harvest(_amount, block.number);
+        } else {
+            // Any other token, emit to tree
+            (
+                uint256 governanceRewardsFee,
+                uint256 strategistRewardsFee
+            ) = _processRewardsFees(_amount, token);
+
+            // Transfer balance of Sushi to the Badger Tree
+            uint256 rewardToTree = _amount.sub(governanceRewardsFee).sub(
+                strategistRewardsFee
+            );
+            IERC20Upgradeable(token).safeTransfer(BADGER_TREE, rewardToTree);
+
+            // NOTE: Signal the _amount of reward sent to the badger tree
+            emit TreeDistribution(
+                reward,
+                rewardToTree,
+                block.number,
+                block.timestamp
+            );
+        }
+    }
+
+    function _getBalances() internal {
+        // TODO
+        // Flatten ->
+    }
+
+    function flatten(address[][] memory data) public pure returns(address[] memory){
+        uint256 resultLength; // How many total addresses we will have
+         
+        // Get the destination length
+        uint256 externalLength = data.length;
+        uint256[] memory spacings = new uint256[](externalLength); // Length of each x slot so we can run the math as there's no guarantee each spot will have same length
+        for(uint256 x; x < externalLength; x++) {
+            resultLength += data[x].length;
+            spacings[x] += data[x].length;
+
+            if(x > 0){
+                spacings[x] += spacings[x - 1]; // Add prev value
+            }
+        }
+
+        // Dump into one list
+        address[] memory result = new address[](resultLength);
+
+        for(uint256 x; x < externalLength; x++) {
+            uint256 internalLength = data[x].length;
+            for(uint256 y; y < internalLength; y++) {
+                uint256 offset;
+                if(x > 0){
+                    offset = spacings[x - 1];
+                }
+                result[offset + y] = data[x][y];
+            }
+        }
+
+        return result;
+    }
+
+    // https://gist.github.com/subhodi/b3b86cc13ad2636420963e692a4d896f
+    function sort(address[] memory data) public pure returns(address[] memory) {
+       _quickSort(data, int(0), int(data.length - 1));
+       return data;
+    }
+    
+    function _quickSort(address[] memory arr, int left, int right) internal pure {
+        int i = left;
+        int j = right;
+        if(i==j) return;
+        address pivot = arr[uint(left + (right - left) / 2)];
+        while (i <= j) {
+            while (arr[uint(i)] < pivot) i++;
+            while (pivot < arr[uint(j)]) j--;
+            if (i <= j) {
+                (arr[uint(i)], arr[uint(j)]) = (arr[uint(j)], arr[uint(i)]);
+                i++;
+                j--;
+            }
+        }
+        if (left < j)
+            _quickSort(arr, left, j);
+        if (i < right)
+            _quickSort(arr, i, right);
+    }
+
+    function getUniques(address[] memory data) public pure returns (address[] memory) {
+        // Assume sorted, pre-sort to get this to work
+        uint256 length = data.length;
+        for(x; x < length; x++) {
+            
+        }
+    }
+
+    function getUniqueAddresses(address[][] memory data) public pure returns (address[] memory){
+        address[] memory flattened = flatten(data);
+        sort(flattened); // Happens in memory
+        getUniques(flattened);
+
+        return flattened;
+    }
+
+
     /// @dev invest the amount of want
     /// @notice When this function is called, the controller has already sent want to this
     /// @notice Just get the current balance and then invest accordingly
     function _deposit(uint256 _amount) internal override {
-        IBaseV1Gauge(lpComponent).deposit(_amount, 0);
+        if(lockId != 0) {
+            // Lock More
+            VE.increase_amount(lockId, _amount);
+        } else {
+            // Create lock, for maximum time
+            lockId = VE.create_lock(_amount, MAXTIME);
+        }
     }
 
     /// @dev utility function to withdraw everything for migration
     function _withdrawAll() internal override {
-        IBaseV1Gauge(lpComponent).withdrawAll();
+        VE.withdraw(lockId); // Revert if lock not expired
     }
 
     /// @dev withdraw the specified amount of want, liquidate from lpComponent to want, paying off any necessary debt for the conversion
@@ -131,9 +339,13 @@ contract MyStrategy is BaseStrategy {
         override
         returns (uint256)
     {
-        uint256 balanceBefore = balanceOfWant();
-        IBaseV1Gauge(lpComponent).withdraw(_amount);
-        return balanceOfWant().sub(balanceBefore);
+        if(balanceOfWant() >= _amount) {
+            return _amount; // We have liquid assets, just send those
+        }
+
+        VE.withdraw(lockId); // Will revert is lock is not expired
+
+        return balanceOfWant();
     }
 
     /// @dev Harvest from strategy mechanics, realizing increase in underlying position
