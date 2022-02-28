@@ -40,9 +40,20 @@ interface IVe {
 
     function deposit_for(uint256 tokenId, uint256 value) external;
 
+
+    // Used by the strategy
     function create_lock(uint256 _value, uint256 _lock_duration)
         external
         returns (uint256);
 
-    function MAXTIME() external returns (uint256);
+    function increase_amount(uint _tokenId, uint _value) external;
+    function increase_unlock_time(uint _tokenId, uint _lock_duration) external;
+    function withdraw(uint _tokenId) external;
+
+    struct LockedBalance {
+        int128 amount;
+        uint end;
+    }
+
+    function locked(uint _tokenId) external view returns(LockedBalance memory);
 }

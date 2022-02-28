@@ -159,8 +159,8 @@ def check_parameters(
 
     # Not all strategies use the badgerTree
     try:
-        if strategy.badgerTree() != AddressZero:
-            assert strategy.badgerTree() == badgerTree
+        if strategy.BADGER_TREE() != AddressZero:
+            assert strategy.BADGER_TREE() == badgerTree
     except:
         pass
 

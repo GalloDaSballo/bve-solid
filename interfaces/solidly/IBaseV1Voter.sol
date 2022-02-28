@@ -4,18 +4,6 @@ pragma solidity ^0.6.0;
 pragma experimental ABIEncoderV2;
 
 interface IBaseV1Voter {
-    function claimBribes(
-        address[] memory _bribes,
-        address[][] memory _tokens,
-        uint256 _tokenId
-    ) external;
-
-    function claimFees(
-        address[] memory _bribes,
-        address[][] memory _tokens,
-        uint256 _tokenId
-    ) external;
-
     function distribute() external;
 
     function vote(
@@ -26,6 +14,8 @@ interface IBaseV1Voter {
 
     function claimable(address gauge) external view returns (uint256);
 
+    function claimFees(address[] memory _fees, address[][] memory _tokens, uint _tokenId) external;
+    function claimBribes(address[] memory _bribes, address[][] memory _tokens, uint _tokenId) external;
     function claimRewards(address[] memory _gauges, address[][] memory _tokens)
         external;
 

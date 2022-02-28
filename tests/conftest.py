@@ -37,59 +37,16 @@ def voter():
     return interface.IBaseV1Voter("0xdC819F5d05a6859D2faCbB4A44E5aB105762dbaE")
 
 
-@pytest.fixture
-def custom_setup(web3, router, solid, ve, voter):
-    dev = accounts[0]
-    STABLE = True
-    AMT = 1000e18
-
-    pair = interface.IBaseV1Pair(WANT)
-
-    token0 = interface.IBridgedToken(pair.token0())
-    token1 = interface.IBridgedToken(pair.token1())
-
-    for token in [token0, token1]:
-        token.Swapin(web3.keccak(0), dev, AMT, {"from": token.owner()})
-
-        token.approve(router, AMT, {"from": dev})
-
-    ## Add liquidity
-    router.addLiquidity(
-        token0,
-        token1,
-        STABLE,
-        token0.balanceOf(dev),
-        token1.balanceOf(dev),
-        0,
-        0,
-        dev,
-        999999999999999999999,
-        {"from": dev},
-    )
-
-    ## Confirm liqudiity is in
-    print(f"Balance: {pair.balanceOf(dev)}")
-
-    ## Approve the gauge
-    pair.approve(LP_COMPONENT, pair.balanceOf(dev), {"from": dev})
-
-    ## Mint token
-    solid.mint(dev, AMT, {"from": solid.minter()})
-    ## Approve for locking
-    solid.approve(ve, AMT, {"from": dev})
-    ## Lock for 4 years
-    lock_tx = ve.create_lock(AMT, 4 * 365 * 86400, {"from": dev})
-
-    ## Vote
-    LOCK_ID = lock_tx.return_value
-    voter.vote(LOCK_ID, [pair], [100], {"from": dev})
-
+WHALE = "0xc4209c19b183e72a037b2d1fb11fbe522054a90d"
 
 @pytest.fixture
-def deployed(custom_setup):
+def deployed():
     """
     Deploys, vault, controller and strats and wires them up for you to test
     """
+
+
+
     deployer = accounts[0]
 
     strategist = deployer
@@ -141,6 +98,8 @@ def deployed(custom_setup):
     want = interface.IERC20(WANT)
     lpComponent = interface.IERC20(LP_COMPONENT)
     rewardToken = interface.IERC20(REWARD_TOKEN)
+
+    want.transfer(deployer, want.balanceOf(WHALE), {"from": accounts.at(WHALE, force=True)})
 
     ## Wire up Controller to Strart
     ## In testing will pass, but on live it will fail
