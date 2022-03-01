@@ -165,34 +165,101 @@ contract MyStrategy is BaseStrategy, ReentrancyGuardUpgradeable {
 
 
     /// Claim Tokens
-    function claimRewards(address[] memory _gauges, address[][] memory _tokens) external nonReentrant {
+    function claimRewards(address _gauge, address[] memory _tokens) external nonReentrant {
         _onlyTrusted();
-        VOTER.claimRewards(_gauges, _tokens);
 
-        revert("TODO"); // TODO: Figure out what to do here, prob gotta harvest what we got
+        uint256 length = _tokens.length;
+
+        // Get initial Amounts
+        uint256[] memory amounts = new uint256[](length);
+
+        for(uint i; i < length; ++i) {
+            amounts[i] = IERC20Upgradeable(_tokens[i]).balanceOf(address(this));
+        }
+
+        // Claim
+        address[] memory gauges = new address[](1);
+        gauges[0] = _gauge;
+
+        address[][] memory tokens = new address[][](1);
+        tokens[0] = _tokens;
+
+        VOTER.claimRewards(gauges, tokens);
+
+
+        // Get Amounts balAfter & Handle the diff
+        for(uint i; i < length; ++i) {
+            uint256 balAfter = IERC20Upgradeable(_tokens[i]).balanceOf(address(this));
+            uint256 toSend = balAfter.sub(amounts[i]);
+
+            // Send it here else a duplicate will break the math
+            // Safe because we send all the tokens, hence a duplicate will have difference = 0 and will stop
+            _handleToken(_tokens[i], toSend);
+        }
     }
 
-    function claimBribes(address[] memory _bribes, address[][] memory _tokens, uint _tokenId) external nonReentrant {
+    function claimBribes(address _bribe, address[] memory _tokens, uint _tokenId) external nonReentrant {
         _onlyTrusted();
-        VOTER.claimBribes(_bribes, _tokens, _tokenId);
 
-        revert("TODO"); // TODO: Figure out what to do here, prob gotta harvest what we got
+        uint256 length = _tokens.length;
+
+        // Get initial Amounts
+        uint256[] memory amounts = new uint256[](length);
+
+        for(uint i; i < length; ++i) {
+            amounts[i] = IERC20Upgradeable(_tokens[i]).balanceOf(address(this));
+        }
+
+        // Claim
+        address[] memory bribes = new address[](1);
+        bribes[0] = _bribe;
+
+        address[][] memory tokens = new address[][](1);
+        tokens[0] = _tokens;
+
+        VOTER.claimBribes(bribes, tokens, _tokenId);
+
+        // Get Amounts balAfter & Handle the diff
+        for(uint i; i < length; ++i) {
+            uint256 balAfter = IERC20Upgradeable(_tokens[i]).balanceOf(address(this));
+            uint256 toSend = balAfter.sub(amounts[i]);
+
+            // Send it here else a duplicate will break the math
+            // Safe because we send all the tokens, hence a duplicate will have difference = 0 and will stop
+            _handleToken(_tokens[i], toSend);
+        }
     }
 
-    function claimFees(address[] memory _fees, address[][] memory _tokens, uint _tokenId) external nonReentrant {
+    function claimFees(address _fee, address[] memory _tokens, uint _tokenId) external nonReentrant {
         _onlyTrusted();
 
-        address[] memory tokensAlreadyProcessed = new address[](50); // Our flattened list
-        uint256[] memory amounts = new uint256[](50); // Our amounts
+        uint256 length = _tokens.length;
 
-        // We flatten by simply doubly iterating on `_tokens` and if we already processed we don't add
-        // When iterating again we will check for address(0) and if found we will stop looping
+        // Get initial Amounts
+        uint256[] memory amounts = new uint256[](length);
 
+        for(uint i; i < length; ++i) {
+            amounts[i] = IERC20Upgradeable(_tokens[i]).balanceOf(address(this));
+        }
 
+        // Claim
+        address[] memory fees = new address[](1);
+        fees[0] = _fee;
 
-        VOTER.claimFees(_fees, _tokens, _tokenId);
+        address[][] memory tokens = new address[][](1);
+        tokens[0] = _tokens;
 
-        revert("TODO"); // TODO: Figure out what to do here, prob gotta harvest what we got
+        VOTER.claimFees(fees, tokens, _tokenId);
+
+        // Get Amounts balAfter & Handle the diff
+        for(uint i; i < length; ++i) {
+            uint256 balAfter = IERC20Upgradeable(_tokens[i]).balanceOf(address(this));
+            uint256 toSend = balAfter.sub(amounts[i]);
+
+            // Send it here else a duplicate will break the math
+            // Safe because we send all the tokens, hence a duplicate will have difference = 0 and will stop
+            _handleToken(_tokens[i], toSend);
+        }
     }
 
     
@@ -200,12 +267,10 @@ contract MyStrategy is BaseStrategy, ReentrancyGuardUpgradeable {
     function vote(address[] memory _poolVote, int256[] memory _weights) external nonReentrant {
         _onlyGovernance();
         VOTER.vote(lockId, _poolVote, _weights);
-
-        /// To Consider, after voting we could set a lit of pools which would allow to derive the gauges to claim from
     }
 
     function _handleToken(address token, uint256 _amount) internal {
-        if(_amount == 0) { return; }
+        if(_amount == 0) { return; } // If we get duplicate token, before - balAfter is going to be 0
 
         if(token == want) {
             // It's SOLID, lock more, emit harvest event
@@ -234,86 +299,6 @@ contract MyStrategy is BaseStrategy, ReentrancyGuardUpgradeable {
             );
         }
     }
-
-    function _getBalances() internal {
-        // TODO
-        // Flatten ->
-    }
-
-    function flatten(address[][] memory data) public pure returns(address[] memory){
-        uint256 resultLength; // How many total addresses we will have
-         
-        // Get the destination length
-        uint256 externalLength = data.length;
-        uint256[] memory spacings = new uint256[](externalLength); // Length of each x slot so we can run the math as there's no guarantee each spot will have same length
-        for(uint256 x; x < externalLength; x++) {
-            resultLength += data[x].length;
-            spacings[x] += data[x].length;
-
-            if(x > 0){
-                spacings[x] += spacings[x - 1]; // Add prev value
-            }
-        }
-
-        // Dump into one list
-        address[] memory result = new address[](resultLength);
-
-        for(uint256 x; x < externalLength; x++) {
-            uint256 internalLength = data[x].length;
-            for(uint256 y; y < internalLength; y++) {
-                uint256 offset;
-                if(x > 0){
-                    offset = spacings[x - 1];
-                }
-                result[offset + y] = data[x][y];
-            }
-        }
-
-        return result;
-    }
-
-    // https://gist.github.com/subhodi/b3b86cc13ad2636420963e692a4d896f
-    function sort(address[] memory data) public pure returns(address[] memory) {
-       _quickSort(data, int(0), int(data.length - 1));
-       return data;
-    }
-    
-    function _quickSort(address[] memory arr, int left, int right) internal pure {
-        int i = left;
-        int j = right;
-        if(i==j) return;
-        address pivot = arr[uint(left + (right - left) / 2)];
-        while (i <= j) {
-            while (arr[uint(i)] < pivot) i++;
-            while (pivot < arr[uint(j)]) j--;
-            if (i <= j) {
-                (arr[uint(i)], arr[uint(j)]) = (arr[uint(j)], arr[uint(i)]);
-                i++;
-                j--;
-            }
-        }
-        if (left < j)
-            _quickSort(arr, left, j);
-        if (i < right)
-            _quickSort(arr, i, right);
-    }
-
-    function getUniques(address[] memory data) public pure returns (address[] memory) {
-        // Assume sorted, pre-sort to get this to work
-        uint256 length = data.length;
-        for(x; x < length; x++) {
-            
-        }
-    }
-
-    function getUniqueAddresses(address[][] memory data) public pure returns (address[] memory){
-        address[] memory flattened = flatten(data);
-        sort(flattened); // Happens in memory
-        getUniques(flattened);
-
-        return flattened;
-    }
-
 
     /// @dev invest the amount of want
     /// @notice When this function is called, the controller has already sent want to this
